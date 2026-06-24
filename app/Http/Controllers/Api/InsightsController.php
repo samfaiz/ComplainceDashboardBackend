@@ -1,0 +1,254 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\Endpoint;
+use App\Models\Snapshot;
+use App\Services\Ingest\RuleEvaluator;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
+
+/**
+ * Scope-aware data endpoints. A "scope" selects which sources to aggregate:
+ *   - all            → every source the user owns ("All sites")
+ *   - site:{id}      → all sources assigned to that site
+ *   - source:{id}    → a single source
+ *
+ * This powers the dashboard/data views so a user can monitor one source, one
+ * site, or their entire estate in a single pane.
+ */
+class InsightsController extends Controller
+{
+    private const FIELDS = [
+        'hostname', 'os_platform', 'os_version', 'agent_version',
+        'health_status', 'compliance_status', 'ip_address', 'mac_address',
+        'last_seen_at', 'external_id', 'is_isolated',
+    ];
+
+    public function summary(Request $request): JsonResponse
+    {
+        $sources = $this->resolveSources($request);
+        $snapshotIds = $this->snapshotIds($sources);
+
+        $snapshots = Snapshot::whereIn('id', $snapshotIds)->get(['summary', 'captured_at', 'endpoint_count']);
+        $summary = $this->mergeSummaries($snapshots->pluck('summary')->filter()->all());
+
+        $failing = $sources->where('last_status', 'failed');
+        $lastError = $failing->isNotEmpty()
+            ? $failing->count().' source(s) failed to refresh: '.$failing->pluck('name')->implode(', ')
+            : null;
+
+        return response()->json([
+            'summary' => $summary,
+            'captured_at' => $snapshots->max('captured_at'),
+            'endpoint_count' => $summary['total'] ?? 0,
+            'source_count' => $sources->count(),
+            'last_error' => $lastError,
+        ]);
+    }
+
+    public function aggregate(Request $request): JsonResponse
+    {
+        $field = $request->input('field', 'os_platform');
+        abort_unless(in_array($field, self::FIELDS, true), 422, 'Unsupported field.');
+
+        $snapshotIds = $this->snapshotIds($this->resolveSources($request));
+
+        if (empty($snapshotIds)) {
+            return response()->json(['field' => $field, 'buckets' => []]);
+        }
+
+        $rows = Endpoint::query()
+            ->whereIn('snapshot_id', $snapshotIds)
+            ->selectRaw("COALESCE($field, 'Unknown') as label, COUNT(*) as value")
+            ->groupBy('label')
+            ->orderByDesc('value')
+            ->limit((int) $request->input('limit', 30))
+            ->get();
+
+        return response()->json([
+            'field' => $field,
+            'buckets' => $rows->map(fn ($r) => ['label' => (string) $r->label, 'value' => (int) $r->value])->all(),
+        ]);
+    }
+
+    public function trends(Request $request): JsonResponse
+    {
+        $sources = $this->resolveSources($request);
+        $sourceIds = $sources->pluck('id')->all();
+
+        if (empty($sourceIds)) {
+            return response()->json(['series' => []]);
+        }
+
+        $snapshots = Snapshot::whereIn('api_source_id', $sourceIds)
+            ->orderBy('captured_at')
+            ->get(['api_source_id', 'captured_at', 'endpoint_count', 'summary']);
+
+        // Keep the latest snapshot per (source, day) so multiple daily pulls don't double-count.
+        $latestPerSourceDay = [];
+        foreach ($snapshots as $s) {
+            $day = $s->captured_at->format('Y-m-d');
+            $key = $s->api_source_id.'|'.$day;
+            if (! isset($latestPerSourceDay[$key]) || $s->captured_at->gt($latestPerSourceDay[$key]->captured_at)) {
+                $latestPerSourceDay[$key] = $s;
+            }
+        }
+
+        // Sum across sources per day.
+        $byDay = [];
+        foreach ($latestPerSourceDay as $s) {
+            $day = $s->captured_at->format('Y-m-d');
+            $sum = $s->summary ?? [];
+            $byDay[$day] ??= ['captured_at' => $day, 'total' => 0, 'online' => 0, 'stale' => 0, 'offline' => 0, 'compliant' => 0, 'non_compliant' => 0];
+            $byDay[$day]['total'] += $s->endpoint_count;
+            foreach (['online', 'stale', 'offline', 'compliant', 'non_compliant'] as $k) {
+                $byDay[$day][$k] += $sum[$k] ?? 0;
+            }
+        }
+
+        ksort($byDay);
+        $series = array_map(function ($row) {
+            $row['compliance_pct'] = $row['total'] > 0 ? round($row['compliant'] / $row['total'] * 100, 1) : 0;
+
+            return $row;
+        }, array_values($byDay));
+
+        $limit = min((int) $request->input('limit', 90), 365);
+
+        return response()->json(['series' => array_slice($series, -$limit)]);
+    }
+
+    /** Count endpoints in scope that match a user-defined rule. */
+    public function evaluate(Request $request, RuleEvaluator $evaluator): JsonResponse
+    {
+        $request->validate([
+            'rule' => ['required', 'array'],
+            'rule.match' => ['nullable', Rule::in(['all', 'any'])],
+            'rule.conditions' => ['required', 'array', 'min:1'],
+            'rule.conditions.*.field' => ['required', 'string'],
+            'rule.conditions.*.op' => ['required', 'string'],
+        ]);
+
+        $snapshotIds = $this->snapshotIds($this->resolveSources($request));
+
+        return response()->json($evaluator->count($snapshotIds, $request->input('rule')));
+    }
+
+    public function data(Request $request): JsonResponse
+    {
+        $snapshotIds = $this->snapshotIds($this->resolveSources($request));
+
+        if (empty($snapshotIds)) {
+            return response()->json(['data' => [], 'meta' => ['total' => 0], 'columns' => self::FIELDS]);
+        }
+
+        $query = Endpoint::query()->whereIn('snapshot_id', $snapshotIds);
+
+        if ($search = trim((string) $request->input('search'))) {
+            $query->where(function ($q) use ($search) {
+                $q->where('hostname', 'like', "%{$search}%")
+                    ->orWhere('ip_address', 'like', "%{$search}%")
+                    ->orWhere('os_version', 'like', "%{$search}%")
+                    ->orWhere('external_id', 'like', "%{$search}%");
+            });
+        }
+
+        foreach (['os_platform', 'health_status', 'compliance_status', 'agent_version'] as $filter) {
+            if ($request->filled($filter)) {
+                $query->where($filter, $request->input($filter));
+            }
+        }
+
+        $sort = in_array($request->input('sort'), self::FIELDS, true) ? $request->input('sort') : 'hostname';
+        $dir = $request->input('dir') === 'desc' ? 'desc' : 'asc';
+        $query->orderBy($sort, $dir);
+
+        $page = $query->paginate(min((int) $request->input('per_page', 25), 200));
+
+        return response()->json([
+            'data' => collect($page->items())->map(fn (Endpoint $e) => [
+                'id' => $e->id,
+                'external_id' => $e->external_id,
+                'hostname' => $e->hostname,
+                'os_platform' => $e->os_platform,
+                'os_version' => $e->os_version,
+                'agent_version' => $e->agent_version,
+                'health_status' => $e->health_status,
+                'compliance_status' => $e->compliance_status,
+                'last_seen_at' => $e->last_seen_at,
+                'ip_address' => $e->ip_address,
+                'mac_address' => $e->mac_address,
+                'is_isolated' => $e->is_isolated,
+                'extra' => $e->extra,
+            ])->all(),
+            'meta' => [
+                'total' => $page->total(),
+                'per_page' => $page->perPage(),
+                'current_page' => $page->currentPage(),
+                'last_page' => $page->lastPage(),
+            ],
+            'columns' => self::FIELDS,
+        ]);
+    }
+
+    /* ------------------------------------------------------------------ */
+
+    private function resolveSources(Request $request): Collection
+    {
+        $scope = (string) $request->input('scope', 'all');
+        $base = $request->user()->apiSources();
+
+        if (str_starts_with($scope, 'site:')) {
+            return $base->where('site_id', (int) substr($scope, 5))->get();
+        }
+        if (str_starts_with($scope, 'source:')) {
+            return $base->whereKey((int) substr($scope, 7))->get();
+        }
+
+        return $base->get(); // "all"
+    }
+
+    private function snapshotIds(Collection $sources): array
+    {
+        return $sources->pluck('latest_snapshot_id')->filter()->values()->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $summaries
+     * @return array<string, mixed>
+     */
+    private function mergeSummaries(array $summaries): array
+    {
+        $scalars = ['total', 'online', 'stale', 'offline', 'compliant', 'non_compliant'];
+        $maps = ['by_os', 'by_health', 'by_compliance', 'by_agent_version'];
+
+        $out = array_fill_keys($scalars, 0);
+        foreach ($maps as $m) {
+            $out[$m] = [];
+        }
+
+        foreach ($summaries as $s) {
+            foreach ($scalars as $k) {
+                $out[$k] += $s[$k] ?? 0;
+            }
+            foreach ($maps as $m) {
+                foreach (($s[$m] ?? []) as $label => $count) {
+                    $out[$m][$label] = ($out[$m][$label] ?? 0) + $count;
+                }
+            }
+        }
+
+        foreach ($maps as $m) {
+            arsort($out[$m]);
+        }
+
+        $out['compliance_pct'] = $out['total'] > 0 ? round($out['compliant'] / $out['total'] * 100, 1) : 0;
+        $out['agent_versions'] = count($out['by_agent_version']);
+
+        return $out;
+    }
+}
