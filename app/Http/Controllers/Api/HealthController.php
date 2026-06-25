@@ -37,8 +37,8 @@ class HealthController extends Controller
 
     public function techStack(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->isAdmin(), 403);
-
+        // Visible to all authenticated roles so Analysts/Viewers can monitor CVEs
+        // and trigger a re-scan; surfacing dependency advisories is a shared concern.
         $force = $request->boolean('refresh');
         return response()->json($this->stack->snapshot($force));
     }

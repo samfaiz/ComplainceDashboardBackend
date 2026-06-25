@@ -65,7 +65,8 @@ class MfaController extends Controller
 
     public function regenerateRecoveryCodes(Request $request): JsonResponse
     {
-        $this->ensureCanSelfEnroll($request);
+        // Only admins can self-reset recovery codes; others must request an admin.
+        abort_unless($request->user()->isAdmin(), 403, 'Only an administrator can reset MFA for you.');
 
         $this->requirePassword($request);
         $codes = $this->mfa->regenerateRecoveryCodes($request->user());

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AccountRequest;
 use App\Models\AuditLog;
 use App\Models\Dashboard;
 use App\Models\LoginEvent;
@@ -27,17 +28,23 @@ class AdminController extends Controller
 
     public function users(Request $request): JsonResponse
     {
+        $actor = $request->user();
+
         $users = User::query()
             ->withCount('apiSources')
+            // Admins only see accounts they can manage; super admins see everyone.
+            ->when(! $actor->isSuperAdmin(), fn ($q) => $q->whereIn('role', [User::ROLE_ANALYST, User::ROLE_VIEWER]))
             ->latest()
             ->get()
-            ->map(fn (User $u) => $this->userRow($u));
+            ->map(fn (User $u) => $this->userRow($u) + ['manageable' => $actor->outranks($u)]);
 
         return response()->json(['users' => $users]);
     }
 
     public function show(Request $request, User $user): JsonResponse
     {
+        $this->authorizeTarget($request, $user);
+
         return response()->json([
             'user' => $this->userRow($user),
             'known_ips' => $user->knownIps()->orderByDesc('last_seen_at')->get(),
@@ -54,6 +61,8 @@ class AdminController extends Controller
             'password' => ['nullable', 'confirmed', Password::min(12)->mixedCase()->numbers()->symbols()],
         ]);
 
+        $this->assertAssignableRole($request->user(), $data['role']);
+
         $generated = empty($data['password']);
         $password = $generated ? $this->randomPassword() : $data['password'];
 
@@ -67,6 +76,15 @@ class AdminController extends Controller
         ]);
 
         $this->audit->log('admin.user_created', $request->user(), $user, ['role' => $user->role]);
+
+        // Populate a sample dashboard for the new account by default.
+        if (config('security.demo_seed_new_users', true)) {
+            try {
+                app(\App\Services\Demo\DemoDataGenerator::class)->generateFor($user);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
 
         return response()->json([
             'user' => $this->userRow($user),
@@ -82,13 +100,21 @@ class AdminController extends Controller
             'is_active' => ['sometimes', 'boolean'],
         ]);
 
-        // Prevent an admin from locking themselves out of the admin role.
-        if (array_key_exists('role', $data) && $user->id === $request->user()->id && $data['role'] !== User::ROLE_ADMIN) {
-            abort(422, 'You cannot remove your own admin role.');
+        $this->authorizeTarget($request, $user);
+
+        if (array_key_exists('role', $data)) {
+            $this->assertAssignableRole($request->user(), $data['role']);
         }
 
         $oldRole = $user->role;
         $user->update($data);
+
+        // Re-enabling an account clears the brute-force lock/counter so the user
+        // isn't immediately re-disabled on their next attempt.
+        if (($data['is_active'] ?? null) === true) {
+            $user->forceFill(['failed_login_attempts' => 0, 'locked_until' => null])->save();
+        }
+
         $this->audit->log('admin.user_updated', $request->user(), $user, $data);
 
         if (array_key_exists('role', $data) && $oldRole !== $data['role']) {
@@ -105,6 +131,8 @@ class AdminController extends Controller
 
     public function resetPassword(Request $request, User $user): JsonResponse
     {
+        $this->authorizeTarget($request, $user);
+
         $data = $request->validate([
             'password' => ['nullable', 'confirmed', Password::min(12)->mixedCase()->numbers()->symbols()],
         ]);
@@ -120,6 +148,7 @@ class AdminController extends Controller
         ])->save();
 
         $this->audit->log('admin.password_reset', $request->user(), $user);
+        $this->resolveRequests($user, 'password', $request->user());
 
         // Notify the affected user (single recipient = the user themselves).
         $this->notifications->dispatch('account.password_reset', [
@@ -135,6 +164,7 @@ class AdminController extends Controller
 
     public function clearIpFlag(Request $request, User $user): JsonResponse
     {
+        $this->authorizeTarget($request, $user);
         $user->forceFill(['ip_flagged' => false])->save();
 
         if ($user->current_ip) {
@@ -151,6 +181,7 @@ class AdminController extends Controller
 
     public function unlock(Request $request, User $user): JsonResponse
     {
+        $this->authorizeTarget($request, $user);
         $user->forceFill(['locked_until' => null, 'failed_login_attempts' => 0])->save();
         $this->audit->log('admin.user_unlocked', $request->user(), $user);
 
@@ -159,8 +190,10 @@ class AdminController extends Controller
 
     public function disableMfa(Request $request, User $user): JsonResponse
     {
+        $this->authorizeTarget($request, $user);
         $this->mfa->disable($user);
         $this->audit->log('admin.mfa_disabled', $request->user(), $user);
+        $this->resolveRequests($user, 'mfa', $request->user());
 
         $this->notifications->dispatch('account.mfa_disabled', [
             'user' => ['email' => $user->email, 'name' => $user->name],
@@ -174,6 +207,7 @@ class AdminController extends Controller
     /** Toggle whether a user is allowed (and required on next login) to enroll MFA. */
     public function setMfaRequired(Request $request, User $user): JsonResponse
     {
+        $this->authorizeTarget($request, $user);
         $data = $request->validate(['required' => ['required', 'boolean']]);
 
         $user->forceFill(['mfa_required' => $data['required']])->save();
@@ -188,9 +222,12 @@ class AdminController extends Controller
             abort(422, 'You cannot delete your own account.');
         }
 
-        // Don't allow removing the last admin — leaves the system unmanageable.
-        if ($user->isAdmin() && User::where('role', User::ROLE_ADMIN)->where('id', '!=', $user->id)->count() === 0) {
-            abort(422, 'Refusing to delete the last admin account.');
+        $this->authorizeTarget($request, $user);
+
+        // Don't allow removing the last administrator — leaves the system unmanageable.
+        if ($user->isAdmin()
+            && User::whereIn('role', [User::ROLE_SUPER_ADMIN, User::ROLE_ADMIN])->where('id', '!=', $user->id)->count() === 0) {
+            abort(422, 'Refusing to delete the last administrator account.');
         }
 
         $snapshot = ['id' => $user->id, 'email' => $user->email, 'name' => $user->name, 'role' => $user->role];
@@ -213,6 +250,51 @@ class AdminController extends Controller
             ->get();
 
         return response()->json(['events' => $events]);
+    }
+
+    /** Pending password/MFA reset requests for the Admin → Requests inbox. */
+    public function resetRequests(Request $request): JsonResponse
+    {
+        $requests = AccountRequest::query()
+            ->with('user:id,name,email,role')
+            ->where('status', 'pending')
+            ->when(
+                ! $request->user()->isSuperAdmin(),
+                fn ($q) => $q->whereHas('user', fn ($u) => $u->whereIn('role', [User::ROLE_ANALYST, User::ROLE_VIEWER]))
+            )
+            ->latest()
+            ->get()
+            ->filter(fn (AccountRequest $r) => $r->user !== null)
+            ->map(fn (AccountRequest $r) => [
+                'id' => $r->id,
+                'type' => $r->type,
+                'created_at' => $r->created_at,
+                'user' => [
+                    'id' => $r->user->id,
+                    'name' => $r->user->name,
+                    'email' => $r->user->email,
+                    'role' => $r->user->role,
+                ],
+            ])
+            ->values();
+
+        return response()->json(['requests' => $requests]);
+    }
+
+    /** Dismiss a request without acting on it. */
+    public function dismissRequest(Request $request, AccountRequest $accountRequest): JsonResponse
+    {
+        if ($accountRequest->user) {
+            $this->authorizeTarget($request, $accountRequest->user);
+        }
+
+        $accountRequest->forceFill([
+            'status' => 'handled',
+            'handled_by_user_id' => $request->user()->id,
+            'handled_at' => now(),
+        ])->save();
+
+        return response()->json(['message' => 'Request dismissed.']);
     }
 
     /* ------------------------------------------------------------------ */
@@ -248,6 +330,7 @@ class AdminController extends Controller
 
     public function userDashboards(Request $request, User $user): JsonResponse
     {
+        $this->authorizeTarget($request, $user);
         $assigned = $user->assignedDashboards()
             ->with('user:id,name,email')
             ->get()
@@ -268,6 +351,8 @@ class AdminController extends Controller
 
     public function assignDashboard(Request $request, User $user): JsonResponse
     {
+        $this->authorizeTarget($request, $user);
+
         $data = $request->validate([
             'dashboard_id' => ['required', 'integer', 'exists:dashboards,id'],
         ]);
@@ -306,6 +391,7 @@ class AdminController extends Controller
 
     public function unassignDashboard(Request $request, User $user, Dashboard $dashboard): JsonResponse
     {
+        $this->authorizeTarget($request, $user);
         $detached = $user->assignedDashboards()->detach($dashboard->id);
 
         if ($detached === 0) {
@@ -331,6 +417,35 @@ class AdminController extends Controller
             ->get();
 
         return response()->json(['logs' => $logs]);
+    }
+
+    /** Abort unless the actor strictly outranks the target account. */
+    private function authorizeTarget(Request $request, User $target): void
+    {
+        abort_unless(
+            $request->user()->outranks($target),
+            403,
+            'You cannot manage an account at or above your own role.'
+        );
+    }
+
+    /** Mark any pending reset requests of this type for the user as handled. */
+    private function resolveRequests(User $target, string $type, User $actor): void
+    {
+        AccountRequest::where('user_id', $target->id)
+            ->where('type', $type)
+            ->where('status', 'pending')
+            ->update([
+                'status' => 'handled',
+                'handled_by_user_id' => $actor->id,
+                'handled_at' => now(),
+            ]);
+    }
+
+    /** Abort unless the actor may grant the given role (only roles below their own level). */
+    private function assertAssignableRole(User $actor, string $role): void
+    {
+        abort_unless($actor->canAssignRole($role), 422, 'You are not allowed to assign that role.');
     }
 
     private function randomPassword(): string

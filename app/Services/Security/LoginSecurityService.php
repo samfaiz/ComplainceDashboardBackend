@@ -83,16 +83,40 @@ class LoginSecurityService
 
     public function registerFailure(?User $user, string $email, Request $request, string $reason): void
     {
-        $lockedNow = false;
+        // Only genuine wrong attempts (bad password / failed MFA code) escalate;
+        // attempts that bounce off an existing lock or a disabled account don't count.
+        if ($user && in_array($reason, ['bad_credentials', 'mfa_failed'], true)) {
+            $attempts = (int) $user->failed_login_attempts + 1;
+            $lockAfter = (int) config('security.lockout_after_attempts', 3);
+            $disableAfter = (int) config('security.disable_after_attempts', 6);
+            $lockMinutes = (int) config('security.lockout_minutes', 1);
 
-        if ($user) {
-            $user->increment('failed_login_attempts');
+            // Stage 2 — too many failures: disable the account and alert admins.
+            if ($disableAfter > 0 && $attempts >= $disableAfter && ! $user->isSuperAdmin()) {
+                $user->forceFill([
+                    'failed_login_attempts' => $attempts,
+                    'locked_until' => null,
+                    'is_active' => false,
+                ])->save();
 
-            $max = (int) config('security.max_login_attempts', 8);
-            if ($max > 0 && $user->fresh()->failed_login_attempts >= $max) {
-                $until = now()->addMinutes((int) config('security.lockout_minutes', 15));
-                $user->forceFill(['locked_until' => $until])->save();
-                $lockedNow = true;
+                $this->recordEvent($user, $request, false, false, $reason);
+                $this->audit->log('auth.account_disabled', $user, null, ['attempts' => $attempts], (string) $request->ip());
+
+                $this->notifications->dispatch('account.disabled', [
+                    'user' => ['name' => $user->name, 'email' => $user->email, 'role' => $user->role],
+                    'attempts' => $attempts,
+                    'ip' => (string) $request->ip(),
+                    'when' => now()->toDateTimeString(),
+                ]);
+
+                return;
+            }
+
+            // Stage 1 — short lockout each time the threshold is hit (e.g. every 3).
+            $attrs = ['failed_login_attempts' => $attempts];
+            if ($lockAfter > 0 && $attempts % $lockAfter === 0) {
+                $until = now()->addMinutes($lockMinutes);
+                $attrs['locked_until'] = $until;
 
                 $this->notifications->dispatch('account.locked', [
                     'user' => ['name' => $user->name, 'email' => $user->email],
@@ -100,24 +124,11 @@ class LoginSecurityService
                     'reason' => 'Too many failed sign-in attempts',
                 ]);
             }
+            $user->forceFill($attrs)->save();
         }
 
         $this->recordEvent($user, $request, false, false, $reason);
         $this->audit->log('auth.login_failed', $user, null, compact('email', 'reason'), (string) $request->ip());
-
-        // Optional threshold notification: after every Nth failure, alert admins.
-        if ($user && ! $lockedNow) {
-            $count = (int) $user->fresh()->failed_login_attempts;
-            $threshold = max(3, (int) config('security.max_login_attempts', 8) - 2);
-            if ($count >= $threshold) {
-                $this->notifications->dispatch('login.failed_threshold', [
-                    'email' => $user->email,
-                    'count' => $count,
-                    'ip' => (string) $request->ip(),
-                    'when' => now()->toDateTimeString(),
-                ]);
-            }
-        }
     }
 
     private function recordEvent(?User $user, Request $request, bool $ok, bool $newIp, ?string $reason): void

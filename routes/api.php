@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AccountController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\ApiSourceController;
 use App\Http\Controllers\Api\AuthController;
@@ -26,10 +27,11 @@ Route::post('/login/mfa', [AuthController::class, 'loginMfa']);
 | Authenticated endpoints
 |--------------------------------------------------------------------------
 */
-Route::middleware(['auth:sanctum', 'track'])->group(function () {
+Route::middleware(['auth:sanctum', 'track', 'password.changed', 'mfa.enrolled'])->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::put('/password', [PasswordController::class, 'update']);
+    Route::post('/account/reset-request', [AccountController::class, 'requestReset']);
 
     // Multi-factor authentication management
     Route::post('/mfa/setup', [MfaController::class, 'setup']);
@@ -88,7 +90,7 @@ Route::middleware(['auth:sanctum', 'track'])->group(function () {
     | Admin CMS (admin role only)
     |----------------------------------------------------------------------
     */
-    Route::middleware('role:admin')->prefix('admin')->group(function () {
+    Route::middleware('role:super_admin,admin')->prefix('admin')->group(function () {
         Route::get('/users', [AdminController::class, 'users']);
         Route::post('/users', [AdminController::class, 'store']);
         Route::get('/users/{user}', [AdminController::class, 'show']);
@@ -99,6 +101,8 @@ Route::middleware(['auth:sanctum', 'track'])->group(function () {
         Route::post('/users/{user}/disable-mfa', [AdminController::class, 'disableMfa']);
         Route::put('/users/{user}/mfa-required', [AdminController::class, 'setMfaRequired']);
         Route::delete('/users/{user}', [AdminController::class, 'destroy']);
+        Route::get('/reset-requests', [AdminController::class, 'resetRequests']);
+        Route::post('/reset-requests/{accountRequest}/dismiss', [AdminController::class, 'dismissRequest']);
         Route::get('/login-events', [AdminController::class, 'loginEvents']);
         Route::get('/audit-logs', [AdminController::class, 'auditLogs']);
 

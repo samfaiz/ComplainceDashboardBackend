@@ -20,6 +20,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => \App\Http\Middleware\EnsureRole::class,
             'track' => \App\Http\Middleware\TrackActivity::class,
+            'password.changed' => \App\Http\Middleware\EnsurePasswordChanged::class,
+            'mfa.enrolled' => \App\Http\Middleware\EnsureMfaEnrolled::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

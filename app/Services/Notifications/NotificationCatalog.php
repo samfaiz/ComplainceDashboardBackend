@@ -132,6 +132,47 @@ class NotificationCatalog
 <p>{{ actor.email }} changed the role of <strong>{{ user.email }}</strong> from <code>{{ old_role }}</code> to <code>{{ new_role }}</code>.</p>'),
                 'body_text' => "{{ user.email }} changed from {{ old_role }} to {{ new_role }} by {{ actor.email }}.",
             ],
+            [
+                'event_key' => 'account.disabled',
+                'display_name' => 'Account auto-disabled (brute force)',
+                'category' => 'security',
+                'default_severity' => 'critical',
+                'variables' => [
+                    'user.name' => 'Account name',
+                    'user.email' => 'Account email',
+                    'user.role' => 'Account role',
+                    'attempts' => 'Failed attempts that triggered the disable',
+                    'ip' => 'IP address of the last attempt',
+                    'when' => 'When it was disabled',
+                ],
+                'default_audience' => [User::ROLE_SUPER_ADMIN, User::ROLE_ADMIN],
+                'subject' => '[Security] Account disabled after repeated failures: {{ user.email }}',
+                'body_html' => self::wrap('<h2>Account automatically disabled</h2>
+<p>The account for <strong>{{ user.name }}</strong> ({{ user.email }}, role <code>{{ user.role }}</code>) was <strong>disabled</strong> after {{ attempts }} consecutive failed sign-in attempts from <code>{{ ip }}</code> at {{ when }}.</p>
+<p>Re-enable it from the Admin panel once the user is verified.</p>'),
+                'body_text' => "Account {{ user.email }} disabled after {{ attempts }} failed attempts from {{ ip }} at {{ when }}.",
+            ],
+            [
+                'event_key' => 'account.reset_requested',
+                'display_name' => 'User requested a password/MFA reset',
+                'category' => 'account',
+                'default_severity' => 'warning',
+                'variables' => [
+                    'user.name' => 'Requesting user',
+                    'user.email' => 'Their email',
+                    'user.role' => 'Their role',
+                    'type' => 'What they want reset (password or mfa)',
+                    'when' => 'When the request was made',
+                    'link' => 'Deep link to manage this user in the Admin panel',
+                ],
+                'default_audience' => [User::ROLE_SUPER_ADMIN, User::ROLE_ADMIN],
+                'subject' => 'Reset request ({{ type }}) from {{ user.email }}',
+                'body_html' => self::wrap('<h2>Account reset requested</h2>
+<p><strong>{{ user.name }}</strong> ({{ user.email }}, <code>{{ user.role }}</code>) has asked an administrator to reset their <strong>{{ type }}</strong>.</p>
+<p>Requested at {{ when }}.</p>
+<p style="margin-top:16px;"><a href="{{ link }}" style="background:#2563eb;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;display:inline-block;">Open in Admin &amp; reset their {{ type }}</a></p>'),
+                'body_text' => "{{ user.email }} requested a {{ type }} reset at {{ when }}. Manage: {{ link }}",
+            ],
 
             // ---------------- dashboards ----------------
             [
@@ -202,7 +243,7 @@ class NotificationCatalog
                     'title' => 'Advisory title',
                     'url' => 'Link to the advisory',
                 ],
-                'default_audience' => [User::ROLE_ADMIN],
+                'default_audience' => [User::ROLE_SUPER_ADMIN, User::ROLE_ADMIN, User::ROLE_ANALYST, User::ROLE_VIEWER],
                 'subject' => '[{{ severity }}] {{ cve }} affects {{ package }} {{ version }}',
                 'body_html' => self::wrap('<h2>New vulnerability detected</h2>
 <p>A new advisory affects an installed package in this environment.</p>

@@ -15,11 +15,20 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
+    public const ROLE_SUPER_ADMIN = 'super_admin';
     public const ROLE_ADMIN = 'admin';
     public const ROLE_ANALYST = 'analyst';
     public const ROLE_VIEWER = 'viewer';
 
-    public const ROLES = [self::ROLE_ADMIN, self::ROLE_ANALYST, self::ROLE_VIEWER];
+    public const ROLES = [self::ROLE_SUPER_ADMIN, self::ROLE_ADMIN, self::ROLE_ANALYST, self::ROLE_VIEWER];
+
+    /** Privilege levels — a user can only administer accounts of a strictly lower level. */
+    public const LEVELS = [
+        self::ROLE_VIEWER => 1,
+        self::ROLE_ANALYST => 2,
+        self::ROLE_ADMIN => 3,
+        self::ROLE_SUPER_ADMIN => 4,
+    ];
 
     protected $fillable = [
         'name',
@@ -59,9 +68,15 @@ class User extends Authenticatable
     /* Role helpers                                                        */
     /* ------------------------------------------------------------------ */
 
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === self::ROLE_SUPER_ADMIN;
+    }
+
+    /** "Admin or above" — super admins inherit every admin capability. */
     public function isAdmin(): bool
     {
-        return $this->role === self::ROLE_ADMIN;
+        return in_array($this->role, [self::ROLE_ADMIN, self::ROLE_SUPER_ADMIN], true);
     }
 
     public function hasRole(string ...$roles): bool
@@ -72,7 +87,24 @@ class User extends Authenticatable
     /** Can this user modify data (sources/dashboards), vs. view only? */
     public function canManage(): bool
     {
-        return $this->hasRole(self::ROLE_ADMIN, self::ROLE_ANALYST);
+        return $this->hasRole(self::ROLE_SUPER_ADMIN, self::ROLE_ADMIN, self::ROLE_ANALYST);
+    }
+
+    public function level(): int
+    {
+        return self::LEVELS[$this->role] ?? 0;
+    }
+
+    /** Whether this user can administer the target (must be strictly higher rank). */
+    public function outranks(self $target): bool
+    {
+        return $this->level() > $target->level();
+    }
+
+    /** Whether this user may grant the given role (only roles below their own level). */
+    public function canAssignRole(string $role): bool
+    {
+        return (self::LEVELS[$role] ?? 99) < $this->level();
     }
 
     public function isOnline(): bool

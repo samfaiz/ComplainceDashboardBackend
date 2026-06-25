@@ -33,38 +33,49 @@ class DashboardController extends Controller
     /**
      * Return the user's default dashboard.
      * - Managers: their own default (auto-created on first use).
-     * - Viewers (or anyone without an owned default): first assigned dashboard, if any.
+     * - Viewers/Analysts: an admin-assigned dashboard takes precedence (the L1
+     *   curated view). With no assignment but their own sources (e.g. demo data),
+     *   a default dashboard is auto-created so the page isn't blank.
      */
     public function default(Request $request): JsonResponse
     {
         $user = $request->user();
 
         if ($user->canManage()) {
-            $dashboard = $user->dashboards()->where('is_default', true)->first()
-                ?? $user->dashboards()->create([
-                    'name' => 'Default Dashboard',
-                    'is_default' => true,
-                    'api_source_id' => $user->apiSources()->value('id'),
-                    'layout' => DefaultDashboard::layout(),
-                ]);
-
-            return response()->json(['dashboard' => $this->row($dashboard, owned: true)]);
+            return response()->json(['dashboard' => $this->row($this->ownDefault($user), owned: true)]);
         }
 
-        // Viewer path: prefer assigned dashboard; fall back to none.
+        // Non-manager: an admin-assigned dashboard wins (curated tiered-access view).
         $assigned = $user->assignedDashboards()->orderBy('dashboard_user.created_at')->first();
 
-        if (! $assigned) {
-            return response()->json(['dashboard' => null]);
+        if ($assigned) {
+            $this->audit->log('dashboard.viewed', $user, $assigned, [
+                'dashboard_name' => $assigned->name,
+                'owner_id' => $assigned->user_id,
+                'via' => 'default',
+            ]);
+
+            return response()->json(['dashboard' => $this->row($assigned, owned: false)]);
         }
 
-        $this->audit->log('dashboard.viewed', $user, $assigned, [
-            'dashboard_name' => $assigned->name,
-            'owner_id' => $assigned->user_id,
-            'via' => 'default',
-        ]);
+        // No assignment, but they own sources (demo data): show a default over them.
+        if ($user->apiSources()->exists()) {
+            return response()->json(['dashboard' => $this->row($this->ownDefault($user), owned: true)]);
+        }
 
-        return response()->json(['dashboard' => $this->row($assigned, owned: false)]);
+        return response()->json(['dashboard' => null]);
+    }
+
+    /** The user's own default dashboard, created lazily over their first source. */
+    private function ownDefault(\App\Models\User $user): Dashboard
+    {
+        return $user->dashboards()->where('is_default', true)->first()
+            ?? $user->dashboards()->create([
+                'name' => 'Default Dashboard',
+                'is_default' => true,
+                'api_source_id' => $user->apiSources()->value('id'),
+                'layout' => DefaultDashboard::layout(),
+            ]);
     }
 
     public function store(Request $request): JsonResponse

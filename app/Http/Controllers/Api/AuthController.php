@@ -34,7 +34,7 @@ class AuthController extends Controller
         if ($user && $user->isLocked()) {
             $this->loginSecurity->registerFailure($user, $data['email'], $request, 'locked');
             throw ValidationException::withMessages([
-                'email' => ['Account temporarily locked after too many failed attempts. Try again later.'],
+                'email' => ['Too many failed attempts — this account is locked for a minute. Please try again shortly.'],
             ]);
         }
 
@@ -149,6 +149,7 @@ class AuthController extends Controller
             'role' => $user->role,
             'is_active' => $user->is_active,
             'is_admin' => $user->isAdmin(),
+            'is_super_admin' => $user->isSuperAdmin(),
             'can_manage' => $user->canManage(),
             'mfa_enabled' => $user->mfa_enabled,
             'mfa_required' => (bool) $user->mfa_required,

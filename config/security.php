@@ -16,6 +16,9 @@ return [
 
     'data_encryption_key' => env('DATA_ENCRYPTION_KEY'),
 
+    // Frontend base URL — used to build deep links in admin notification emails.
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:3000'),
+
     'cipher' => 'aes-256-gcm',
 
     /*
@@ -30,9 +33,15 @@ return [
     // How many minutes of inactivity before a user is considered "offline".
     'online_window_minutes' => 5,
 
-    // Lock the account after this many consecutive failed logins (0 = disabled).
-    'max_login_attempts' => 8,
-    'lockout_minutes' => 15,
+    // Staged brute-force protection (set a value to 0 to disable that stage):
+    //   1. After `lockout_after_attempts` consecutive wrong attempts, lock the
+    //      login for `lockout_minutes`.
+    //   2. After `disable_after_attempts` consecutive wrong attempts, disable the
+    //      account entirely and notify admins/super admins. (Super admins are
+    //      locked but never auto-disabled, to avoid locking everyone out.)
+    'lockout_after_attempts' => 3,
+    'lockout_minutes' => 1,
+    'disable_after_attempts' => 6,
 
     /*
     |--------------------------------------------------------------------------
@@ -47,5 +56,12 @@ return [
     | snapshots retain only their aggregated summary (used for trend charts).
     */
     'endpoint_retention_snapshots' => 30,
+
+    /*
+    | Auto-populate sample sites/sources/snapshots for newly created users so their
+    | dashboard is alive out of the box. Set DEMO_SEED_NEW_USERS=false to disable
+    | (e.g. once you're fully in production with real connectors).
+    */
+    'demo_seed_new_users' => env('DEMO_SEED_NEW_USERS', true),
 
 ];
