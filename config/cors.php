@@ -22,7 +22,9 @@ return [
 
     'exposed_headers' => [],
 
-    'max_age' => 0,
+    // Cache the CORS preflight (OPTIONS) so cross-subdomain API calls don't
+    // re-preflight on every request. Browsers cap this (Chrome ~2h, Firefox 24h).
+    'max_age' => 86400,
 
     'supports_credentials' => true,
 

@@ -71,7 +71,7 @@ class RuleEvaluator
         $field = $c['field'] ?? null;
         $op = $c['op'] ?? null;
 
-        if (! in_array($field, self::FIELDS, true) || ! $op) {
+        if (! $op || ! $this->isAllowedField($field)) {
             return false;
         }
 
@@ -81,6 +81,17 @@ class RuleEvaluator
         }
 
         return true;
+    }
+
+    /** Standard column, or a custom mapped field stored in the `extra` JSON (extra.<slug>). */
+    private function isAllowedField(?string $field): bool
+    {
+        if ($field === null) {
+            return false;
+        }
+
+        return in_array($field, self::FIELDS, true)
+            || (bool) preg_match('/^extra\.[A-Za-z0-9_]+$/', $field);
     }
 
     private function applyCondition(Builder $w, array $c, string $method): void
@@ -107,6 +118,13 @@ class RuleEvaluator
 
         if ($field === 'is_isolated') {
             $w->{$method}('is_isolated', filter_var($value, FILTER_VALIDATE_BOOLEAN));
+
+            return;
+        }
+
+        // Custom mapped field stored in the `extra` JSON column (extra.<slug>).
+        if (str_starts_with($field, 'extra.')) {
+            $this->applyExtra($w, 'extra->'.substr($field, 6), $op, $value, $method);
 
             return;
         }
@@ -141,6 +159,50 @@ class RuleEvaluator
                 break;
             default:
                 $w->{$method}($field, '=', $value);
+        }
+    }
+
+    /** Same operators as standard fields, but against a JSON path in `extra`. */
+    private function applyExtra(Builder $w, string $col, string $op, mixed $value, string $method): void
+    {
+        $orInMethod = $method === 'orWhere' ? 'orWhereIn' : 'whereIn';
+
+        switch ($op) {
+            case 'eq':
+                $w->{$method}($col, '=', $value);
+                break;
+            case 'neq':
+                $w->{$method}(function ($x) use ($col, $value) {
+                    $x->where($col, '!=', $value)->orWhereNull($col);
+                });
+                break;
+            case 'contains':
+                $w->{$method}($col, 'like', '%'.$value.'%');
+                break;
+            case 'not_contains':
+                $w->{$method}($col, 'not like', '%'.$value.'%');
+                break;
+            case 'gt':
+                $w->{$method}($col, '>', $value);
+                break;
+            case 'lt':
+                $w->{$method}($col, '<', $value);
+                break;
+            case 'in':
+                $w->{$orInMethod}($col, array_map('trim', explode(',', (string) $value)));
+                break;
+            case 'is_empty':
+                $w->{$method}(function ($x) use ($col) {
+                    $x->whereNull($col)->orWhere($col, '');
+                });
+                break;
+            case 'not_empty':
+                $w->{$method}(function ($x) use ($col) {
+                    $x->whereNotNull($col)->where($col, '!=', '');
+                });
+                break;
+            default:
+                $w->{$method}($col, '=', $value);
         }
     }
 }

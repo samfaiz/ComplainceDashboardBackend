@@ -27,7 +27,7 @@ Route::post('/login/mfa', [AuthController::class, 'loginMfa']);
 | Authenticated endpoints
 |--------------------------------------------------------------------------
 */
-Route::middleware(['auth:sanctum', 'track', 'password.changed', 'mfa.enrolled'])->group(function () {
+Route::middleware(['auth:sanctum', 'active', 'track', 'password.changed', 'mfa.enrolled'])->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::put('/password', [PasswordController::class, 'update']);
@@ -72,6 +72,11 @@ Route::middleware(['auth:sanctum', 'track', 'password.changed', 'mfa.enrolled'])
     Route::get('/insights/data', [InsightsController::class, 'data']);
     Route::post('/insights/evaluate', [InsightsController::class, 'evaluate']);
     Route::post('/insights/rule-data', [InsightsController::class, 'ruleData']);
+
+    // Endpoint table column layout (available fields + shared default + personal override)
+    Route::get('/endpoint-columns', [InsightsController::class, 'columns']);
+    Route::put('/endpoint-columns', [InsightsController::class, 'saveColumns']);
+    Route::delete('/endpoint-columns', [InsightsController::class, 'resetColumns']);
 
     // My notification subscriptions
     Route::get('/notification-subscriptions', [NotificationController::class, 'mySubscriptions']);

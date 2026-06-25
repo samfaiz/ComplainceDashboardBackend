@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Dashboard;
 use App\Models\Endpoint;
+use App\Models\EndpointColumnLayout;
 use App\Models\Snapshot;
 use App\Models\User;
 use App\Services\Ingest\RuleEvaluator;
@@ -236,6 +237,8 @@ class InsightsController extends Controller
                 'mac_address' => $e->mac_address,
                 'is_isolated' => $e->is_isolated,
                 'extra' => $e->extra,
+                // Only ship the (potentially large) raw record when a raw column is shown.
+                'raw' => $request->boolean('with_raw') ? $e->raw : null,
             ])->all(),
             'meta' => [
                 'total' => $page->total(),
@@ -245,6 +248,112 @@ class InsightsController extends Controller
             ],
             'columns' => self::FIELDS,
         ]);
+    }
+
+    /** Available columns (standard + mapped custom) plus saved layouts for the Endpoint table. */
+    public function columns(Request $request): JsonResponse
+    {
+        $sources = $this->resolveSources($request);
+
+        $standard = [
+            'hostname' => 'Hostname',
+            'os_platform' => 'OS Platform',
+            'os_version' => 'OS Version',
+            'agent_version' => 'Agent / Sensor Version',
+            'health_status' => 'Health',
+            'compliance_status' => 'Compliance',
+            'last_seen_at' => 'Last Seen',
+            'ip_address' => 'IP Address',
+            'mac_address' => 'MAC Address',
+            'external_id' => 'External ID',
+            'is_isolated' => 'Isolated',
+        ];
+
+        $available = [];
+        foreach ($standard as $key => $label) {
+            $available[] = ['key' => $key, 'label' => $label, 'group' => 'standard'];
+        }
+
+        // Custom mapped fields live under `extra.<slug>`; collect across in-scope sources.
+        $seen = [];
+        foreach ($sources as $source) {
+            foreach (array_keys($source->field_mappings ?? []) as $slug) {
+                if (! array_key_exists($slug, $standard) && ! isset($seen[$slug])) {
+                    $seen[$slug] = true;
+                    $available[] = [
+                        'key' => 'extra.'.$slug,
+                        'label' => ucfirst(str_replace('_', ' ', $slug)),
+                        'group' => 'custom',
+                    ];
+                }
+            }
+        }
+
+        // Raw API fields — every top-level key the source returns (display-only
+        // unless also mapped as a custom field). Sampled from recent endpoints.
+        $snapshotIds = $this->snapshotIds($sources);
+        if (! empty($snapshotIds)) {
+            $rawKeys = [];
+            $sample = Endpoint::whereIn('snapshot_id', $snapshotIds)
+                ->whereNotNull('raw')
+                ->limit(100)
+                ->get(['raw']);
+            foreach ($sample as $endpoint) {
+                if (is_array($endpoint->raw)) {
+                    foreach (array_keys($endpoint->raw) as $k) {
+                        $rawKeys[$k] = true;
+                    }
+                }
+            }
+            ksort($rawKeys);
+            foreach (array_keys($rawKeys) as $k) {
+                $available[] = [
+                    'key' => 'raw.'.$k,
+                    'label' => ucfirst(trim(preg_replace('/(?<!^)(?=[A-Z])/u', ' ', (string) $k))),
+                    'group' => 'raw',
+                ];
+            }
+        }
+
+        return response()->json([
+            'available' => $available,
+            'default' => EndpointColumnLayout::whereNull('user_id')->value('columns'),
+            'mine' => EndpointColumnLayout::where('user_id', $request->user()->id)->value('columns'),
+        ]);
+    }
+
+    /** Save the requesting user's column layout, or (admins only) the shared default. */
+    public function saveColumns(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'columns' => ['present', 'array'],
+            'columns.*.field' => ['required', 'string', 'max:80'],
+            'columns.*.label' => ['required', 'string', 'max:80'],
+            'columns.*.visible' => ['required', 'boolean'],
+            'as_default' => ['sometimes', 'boolean'],
+        ]);
+
+        $user = $request->user();
+        $asDefault = ! empty($data['as_default']);
+
+        if ($asDefault) {
+            abort_unless($user->isAdmin(), 403, 'Only admins can set the shared default layout.');
+        }
+
+        $layout = EndpointColumnLayout::firstOrNew(['user_id' => $asDefault ? null : $user->id]);
+        $layout->columns = $data['columns'];
+        $layout->updated_by_user_id = $user->id;
+        $layout->save();
+
+        return response()->json(['ok' => true]);
+    }
+
+    /** Clear the user's personal layout so they fall back to the shared default. */
+    public function resetColumns(Request $request): JsonResponse
+    {
+        EndpointColumnLayout::where('user_id', $request->user()->id)->delete();
+
+        return response()->json(['ok' => true]);
     }
 
     /* ------------------------------------------------------------------ */

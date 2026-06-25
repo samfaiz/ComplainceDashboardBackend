@@ -74,7 +74,24 @@ class ApiSourceController extends Controller
             'secret_mode' => $source->secret_mode,
         ]);
 
-        return response()->json(['source' => $this->payload($source)], 201);
+        // First-time pull so the dashboard is populated immediately, instead of
+        // forcing a manual Refresh. Best-effort: a bad key records a failed run
+        // on the source but never fails the create itself. (run() never throws.)
+        $initialRun = null;
+        if (! empty($data['secret'])) {
+            $run = $this->ingest->run($source, $data['secret'], 'initial');
+            $initialRun = [
+                'status' => $run->status,
+                'records_ingested' => $run->records_ingested,
+                'error' => $run->error_message,
+                'duration_ms' => $run->duration_ms,
+            ];
+        }
+
+        return response()->json([
+            'source' => $this->payload($source->fresh()),
+            'initial_run' => $initialRun,
+        ], 201);
     }
 
     public function show(Request $request, ApiSource $source): JsonResponse
