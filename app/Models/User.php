@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -42,6 +43,7 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
             'mfa_enabled' => 'boolean',
+            'mfa_required' => 'boolean',
             'mfa_confirmed_at' => 'datetime',
             'last_login_at' => 'datetime',
             'last_seen_at' => 'datetime',
@@ -103,6 +105,14 @@ class User extends Authenticatable
     public function dashboards(): HasMany
     {
         return $this->hasMany(Dashboard::class);
+    }
+
+    /** Dashboards an admin has assigned to this user (read-only access). */
+    public function assignedDashboards(): BelongsToMany
+    {
+        return $this->belongsToMany(Dashboard::class, 'dashboard_user')
+            ->withPivot(['assigned_by_user_id', 'created_at'])
+            ->withTimestamps();
     }
 
     public function loginEvents(): HasMany

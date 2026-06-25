@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\DataController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\InsightsController;
 use App\Http\Controllers\Api\MfaController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PasswordController;
 use App\Http\Controllers\Api\SiteController;
 use Illuminate\Support\Facades\Route;
@@ -37,6 +38,7 @@ Route::middleware(['auth:sanctum', 'track'])->group(function () {
     Route::post('/mfa/recovery-codes', [MfaController::class, 'regenerateRecoveryCodes']);
 
     Route::get('/health', [HealthController::class, 'index']);
+    Route::get('/health/stack', [HealthController::class, 'techStack']);
 
     // Connector sources & data
     Route::get('/sources/presets', [ApiSourceController::class, 'presets']);
@@ -67,6 +69,11 @@ Route::middleware(['auth:sanctum', 'track'])->group(function () {
     Route::get('/insights/trends', [InsightsController::class, 'trends']);
     Route::get('/insights/data', [InsightsController::class, 'data']);
     Route::post('/insights/evaluate', [InsightsController::class, 'evaluate']);
+    Route::post('/insights/rule-data', [InsightsController::class, 'ruleData']);
+
+    // My notification subscriptions
+    Route::get('/notification-subscriptions', [NotificationController::class, 'mySubscriptions']);
+    Route::put('/notification-subscriptions', [NotificationController::class, 'updateMySubscriptions']);
 
     // Dashboards (per-user, persisted)
     Route::get('/dashboards', [DashboardController::class, 'index']);
@@ -90,7 +97,31 @@ Route::middleware(['auth:sanctum', 'track'])->group(function () {
         Route::post('/users/{user}/clear-ip-flag', [AdminController::class, 'clearIpFlag']);
         Route::post('/users/{user}/unlock', [AdminController::class, 'unlock']);
         Route::post('/users/{user}/disable-mfa', [AdminController::class, 'disableMfa']);
+        Route::put('/users/{user}/mfa-required', [AdminController::class, 'setMfaRequired']);
+        Route::delete('/users/{user}', [AdminController::class, 'destroy']);
         Route::get('/login-events', [AdminController::class, 'loginEvents']);
         Route::get('/audit-logs', [AdminController::class, 'auditLogs']);
+
+        // Dashboard assignment
+        Route::get('/dashboards', [AdminController::class, 'dashboards']);
+        Route::get('/users/{user}/dashboards', [AdminController::class, 'userDashboards']);
+        Route::post('/users/{user}/dashboards', [AdminController::class, 'assignDashboard']);
+        Route::delete('/users/{user}/dashboards/{dashboard}', [AdminController::class, 'unassignDashboard']);
+
+        // Notifications
+        Route::get('/mail-settings', [NotificationController::class, 'getMailSettings']);
+        Route::put('/mail-settings', [NotificationController::class, 'updateMailSettings']);
+        Route::post('/mail-settings/test', [NotificationController::class, 'testMail']);
+
+        Route::get('/notification-templates', [NotificationController::class, 'listTemplates']);
+        Route::put('/notification-templates/{template}', [NotificationController::class, 'updateTemplate']);
+        Route::post('/notification-templates/{template}/reset', [NotificationController::class, 'resetTemplate']);
+        Route::post('/notification-templates/{template}/preview', [NotificationController::class, 'previewTemplate']);
+        Route::post('/notification-templates/{template}/test', [NotificationController::class, 'testTemplate']);
+
+        Route::get('/notification-logs', [NotificationController::class, 'logs']);
+
+        Route::get('/users/{user}/notification-subscriptions', [NotificationController::class, 'userSubscriptions']);
+        Route::put('/users/{user}/notification-subscriptions', [NotificationController::class, 'updateUserSubscriptions']);
     });
 });

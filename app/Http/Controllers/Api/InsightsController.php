@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Dashboard;
 use App\Models\Endpoint;
 use App\Models\Snapshot;
+use App\Models\User;
 use App\Services\Ingest\RuleEvaluator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
@@ -138,6 +140,52 @@ class InsightsController extends Controller
         return response()->json($evaluator->count($snapshotIds, $request->input('rule')));
     }
 
+    /** Return the endpoints matching a rule — powers stat/gauge drill-down. */
+    public function ruleData(Request $request, RuleEvaluator $evaluator): JsonResponse
+    {
+        $request->validate([
+            'rule' => ['required', 'array'],
+            'rule.match' => ['nullable', Rule::in(['all', 'any'])],
+            'rule.conditions' => ['required', 'array', 'min:1'],
+        ]);
+
+        $snapshotIds = $this->snapshotIds($this->resolveSources($request));
+        $query = $evaluator->buildQuery($snapshotIds, $request->input('rule'));
+
+        if (! $query) {
+            return response()->json(['data' => [], 'meta' => ['total' => 0]]);
+        }
+
+        $sort = in_array($request->input('sort'), self::FIELDS, true) ? $request->input('sort') : 'hostname';
+        $dir = $request->input('dir') === 'desc' ? 'desc' : 'asc';
+        $query->orderBy($sort, $dir);
+
+        $page = $query->paginate(min((int) $request->input('per_page', 25), 200));
+
+        return response()->json([
+            'data' => collect($page->items())->map(fn (Endpoint $e) => [
+                'id' => $e->id,
+                'external_id' => $e->external_id,
+                'hostname' => $e->hostname,
+                'os_platform' => $e->os_platform,
+                'os_version' => $e->os_version,
+                'agent_version' => $e->agent_version,
+                'health_status' => $e->health_status,
+                'compliance_status' => $e->compliance_status,
+                'last_seen_at' => $e->last_seen_at,
+                'ip_address' => $e->ip_address,
+                'mac_address' => $e->mac_address,
+                'is_isolated' => $e->is_isolated,
+            ])->all(),
+            'meta' => [
+                'total' => $page->total(),
+                'per_page' => $page->perPage(),
+                'current_page' => $page->currentPage(),
+                'last_page' => $page->lastPage(),
+            ],
+        ]);
+    }
+
     public function data(Request $request): JsonResponse
     {
         $snapshotIds = $this->snapshotIds($this->resolveSources($request));
@@ -157,10 +205,14 @@ class InsightsController extends Controller
             });
         }
 
-        foreach (['os_platform', 'health_status', 'compliance_status', 'agent_version'] as $filter) {
+        // Drill-down filters: any aggregatable field can be passed exactly.
+        foreach (['os_platform', 'os_version', 'health_status', 'compliance_status', 'agent_version', 'ip_address', 'mac_address'] as $filter) {
             if ($request->filled($filter)) {
                 $query->where($filter, $request->input($filter));
             }
+        }
+        if ($request->filled('is_isolated')) {
+            $query->where('is_isolated', filter_var($request->input('is_isolated'), FILTER_VALIDATE_BOOL));
         }
 
         $sort = in_array($request->input('sort'), self::FIELDS, true) ? $request->input('sort') : 'hostname';
@@ -199,8 +251,11 @@ class InsightsController extends Controller
 
     private function resolveSources(Request $request): Collection
     {
+        $user = $request->user();
+        $owner = $this->dashboardOwner($request, $user) ?? $user;
+
         $scope = (string) $request->input('scope', 'all');
-        $base = $request->user()->apiSources();
+        $base = $owner->apiSources();
 
         if (str_starts_with($scope, 'site:')) {
             return $base->where('site_id', (int) substr($scope, 5))->get();
@@ -210,6 +265,34 @@ class InsightsController extends Controller
         }
 
         return $base->get(); // "all"
+    }
+
+    /**
+     * If a dashboard_id is supplied and the user can read it, return its owner
+     * so insights pull from the owner's sources (this is how view-only users
+     * see data on dashboards an admin assigned them).
+     */
+    private function dashboardOwner(Request $request, User $user): ?User
+    {
+        $id = $request->input('dashboard_id');
+        if (! $id) {
+            return null;
+        }
+
+        $dashboard = Dashboard::find($id);
+        if (! $dashboard) {
+            return null;
+        }
+
+        if ($dashboard->user_id === $user->id) {
+            return $user;
+        }
+
+        if (! $dashboard->assignees()->whereKey($user->id)->exists()) {
+            abort(403);
+        }
+
+        return $dashboard->user;
     }
 
     private function snapshotIds(Collection $sources): array

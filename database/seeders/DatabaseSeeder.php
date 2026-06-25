@@ -45,6 +45,7 @@ class DatabaseSeeder extends Seeder
         // Demo connector + 14 days of snapshot data so the dashboard is alive
         // out of the box, even before a real EDR/XDR API is connected.
         $this->call(DemoSourceSeeder::class);
+        $this->call(NotificationTemplateSeeder::class);
 
         if (! $admin->dashboards()->where('is_default', true)->exists()) {
             $admin->dashboards()->create([

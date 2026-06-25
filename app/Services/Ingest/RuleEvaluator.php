@@ -33,20 +33,11 @@ class RuleEvaluator
         }
 
         $total = Endpoint::whereIn('snapshot_id', $snapshotIds)->count();
-        $conditions = array_values(array_filter($rule['conditions'] ?? [], fn ($c) => $this->valid($c)));
+        $query = $this->buildQuery($snapshotIds, $rule);
 
-        if (empty($conditions)) {
+        if (! $query) {
             return ['count' => 0, 'total' => $total, 'pct' => 0];
         }
-
-        $useOr = (($rule['match'] ?? 'all') === 'any');
-
-        $query = Endpoint::whereIn('snapshot_id', $snapshotIds)
-            ->where(function ($w) use ($conditions, $useOr) {
-                foreach ($conditions as $c) {
-                    $this->applyCondition($w, $c, $useOr ? 'orWhere' : 'where');
-                }
-            });
 
         $matched = $query->count();
 
@@ -55,6 +46,24 @@ class RuleEvaluator
             'total' => $total,
             'pct' => $total > 0 ? round($matched / $total * 100, 1) : 0,
         ];
+    }
+
+    /** Build the query for endpoints matching a rule; returns null if rule is empty. */
+    public function buildQuery(array $snapshotIds, array $rule)
+    {
+        $conditions = array_values(array_filter($rule['conditions'] ?? [], fn ($c) => $this->valid($c)));
+        if (empty($conditions) || empty($snapshotIds)) {
+            return null;
+        }
+
+        $useOr = (($rule['match'] ?? 'all') === 'any');
+
+        return Endpoint::whereIn('snapshot_id', $snapshotIds)
+            ->where(function ($w) use ($conditions, $useOr) {
+                foreach ($conditions as $c) {
+                    $this->applyCondition($w, $c, $useOr ? 'orWhere' : 'where');
+                }
+            });
     }
 
     private function valid(array $c): bool

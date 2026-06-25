@@ -17,6 +17,8 @@ class MfaController extends Controller
     /** Begin enrollment: issue a secret + otpauth URL (QR rendered client-side). */
     public function setup(Request $request): JsonResponse
     {
+        $this->ensureCanSelfEnroll($request);
+
         $secret = $this->mfa->generateSecret();
         $request->session()->put('mfa.setup_secret', $secret);
 
@@ -29,6 +31,8 @@ class MfaController extends Controller
     /** Confirm enrollment with a code and return one-time recovery codes. */
     public function confirm(Request $request): JsonResponse
     {
+        $this->ensureCanSelfEnroll($request);
+
         $data = $request->validate(['code' => ['required', 'string']]);
 
         $secret = $request->session()->get('mfa.setup_secret');
@@ -49,6 +53,9 @@ class MfaController extends Controller
 
     public function disable(Request $request): JsonResponse
     {
+        // Only admins can self-disable. Everyone else must ask an admin to reset.
+        abort_unless($request->user()->isAdmin(), 403, 'Only an administrator can disable MFA for you.');
+
         $this->requirePassword($request);
         $this->mfa->disable($request->user());
         $this->audit->log('mfa.disabled', $request->user());
@@ -58,11 +65,27 @@ class MfaController extends Controller
 
     public function regenerateRecoveryCodes(Request $request): JsonResponse
     {
+        $this->ensureCanSelfEnroll($request);
+
         $this->requirePassword($request);
         $codes = $this->mfa->regenerateRecoveryCodes($request->user());
         $this->audit->log('mfa.recovery_codes_regenerated', $request->user());
 
         return response()->json(['recovery_codes' => $codes]);
+    }
+
+    /**
+     * Self-enrollment is restricted to admins and to users an admin has
+     * explicitly flagged via mfa_required = true. Everyone else gets 403.
+     */
+    private function ensureCanSelfEnroll(Request $request): void
+    {
+        $user = $request->user();
+        abort_unless(
+            $user->isAdmin() || $user->mfa_required,
+            403,
+            'MFA enrollment is controlled by your administrator.'
+        );
     }
 
     private function requirePassword(Request $request): void

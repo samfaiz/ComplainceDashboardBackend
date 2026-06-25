@@ -6,6 +6,7 @@ use App\Models\ApiSource;
 use App\Models\Endpoint;
 use App\Models\SourceRun;
 use App\Services\Connectors\ConnectorFactory;
+use App\Services\Notifications\NotificationService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -16,6 +17,7 @@ class IngestService
         private ConnectorFactory $connectors,
         private Normalizer $normalizer,
         private Summarizer $summarizer,
+        private NotificationService $notifications,
     ) {}
 
     /**
@@ -26,6 +28,7 @@ class IngestService
     public function run(ApiSource $source, string $secret, string $trigger = 'scheduled'): SourceRun
     {
         $startedAt = now();
+        $previousStatus = $source->last_status;
 
         /** @var SourceRun $run */
         $run = $source->runs()->create([
@@ -74,6 +77,13 @@ class IngestService
                 'duration_ms' => (int) $startedAt->diffInMilliseconds(now()),
                 'records_ingested' => count($normalized),
             ])->save();
+
+            if ($previousStatus === 'failed') {
+                $this->notifications->dispatch('source.refresh_recovered', [
+                    'source' => ['name' => $source->name, 'vendor' => $source->vendor],
+                    'when' => now()->toDateTimeString(),
+                ]);
+            }
         } catch (Throwable $e) {
             $run->forceFill([
                 'status' => 'failed',
@@ -87,6 +97,16 @@ class IngestService
                 'last_status' => 'failed',
                 'last_error' => $e->getMessage(),
             ])->save();
+
+            // Only notify on the failed→failed transition once per failure, not on
+            // every retry of an already-broken source.
+            if ($previousStatus !== 'failed') {
+                $this->notifications->dispatch('source.refresh_failed', [
+                    'source' => ['name' => $source->name, 'vendor' => $source->vendor],
+                    'error' => mb_substr($e->getMessage(), 0, 500),
+                    'when' => now()->toDateTimeString(),
+                ]);
+            }
         }
 
         return $run->refresh();

@@ -151,6 +151,7 @@ class AuthController extends Controller
             'is_admin' => $user->isAdmin(),
             'can_manage' => $user->canManage(),
             'mfa_enabled' => $user->mfa_enabled,
+            'mfa_required' => (bool) $user->mfa_required,
             'ip_flagged' => $user->ip_flagged,
             'must_change_password' => $user->must_change_password,
             'current_ip' => $user->current_ip,

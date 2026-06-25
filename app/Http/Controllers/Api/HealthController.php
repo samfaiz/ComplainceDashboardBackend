@@ -5,13 +5,17 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\ApiSource;
 use App\Models\User;
+use App\Services\Security\TechStackAuditor;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class HealthController extends Controller
 {
+    public function __construct(private TechStackAuditor $stack) {}
+
     public function index(): JsonResponse
     {
         return response()->json([
@@ -29,6 +33,14 @@ class HealthController extends Controller
             'sources' => $this->sources(),
             'security' => $this->security(),
         ]);
+    }
+
+    public function techStack(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->isAdmin(), 403);
+
+        $force = $request->boolean('refresh');
+        return response()->json($this->stack->snapshot($force));
     }
 
     private function database(): array

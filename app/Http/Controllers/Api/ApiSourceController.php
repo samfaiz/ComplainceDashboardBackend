@@ -202,7 +202,7 @@ class ApiSourceController extends Controller
             'auth_config' => ['nullable', 'array'],
             'request_config' => ['nullable', 'array'],
             'field_mappings' => ['nullable', 'array'],
-            'refresh_interval_minutes' => ['required', 'integer', 'min:5', 'max:10080'],
+            'refresh_interval_minutes' => ['required', 'integer', 'min:15', 'max:10080'],
             'secret_mode' => ['required', Rule::in([ApiSource::SECRET_SAVED, ApiSource::SECRET_PER_LOGIN])],
             'secret' => [$requireSecret ? 'required' : 'nullable', 'string'],
             'is_enabled' => ['sometimes', 'boolean'],

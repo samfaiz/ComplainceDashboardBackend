@@ -4,6 +4,7 @@ namespace App\Services\Security;
 
 use App\Models\LoginEvent;
 use App\Models\User;
+use App\Services\Notifications\NotificationService;
 use Illuminate\Http\Request;
 
 /**
@@ -12,7 +13,10 @@ use Illuminate\Http\Request;
  */
 class LoginSecurityService
 {
-    public function __construct(private AuditLogger $audit) {}
+    public function __construct(
+        private AuditLogger $audit,
+        private NotificationService $notifications,
+    ) {}
 
     /**
      * Record the IP against the user's known-IP baseline.
@@ -65,24 +69,55 @@ class LoginSecurityService
         $this->recordEvent($user, $request, true, $isNewIp, null);
         $this->audit->log('auth.login', $user, null, ['new_ip' => $isNewIp], $ip);
 
+        if ($isNewIp) {
+            $this->notifications->dispatch('login.new_ip', [
+                'user' => ['name' => $user->name, 'email' => $user->email],
+                'ip' => $ip,
+                'user_agent' => substr((string) $request->userAgent(), 0, 240),
+                'when' => now()->toDateTimeString(),
+            ]);
+        }
+
         return $isNewIp;
     }
 
     public function registerFailure(?User $user, string $email, Request $request, string $reason): void
     {
+        $lockedNow = false;
+
         if ($user) {
             $user->increment('failed_login_attempts');
 
             $max = (int) config('security.max_login_attempts', 8);
             if ($max > 0 && $user->fresh()->failed_login_attempts >= $max) {
-                $user->forceFill([
-                    'locked_until' => now()->addMinutes((int) config('security.lockout_minutes', 15)),
-                ])->save();
+                $until = now()->addMinutes((int) config('security.lockout_minutes', 15));
+                $user->forceFill(['locked_until' => $until])->save();
+                $lockedNow = true;
+
+                $this->notifications->dispatch('account.locked', [
+                    'user' => ['name' => $user->name, 'email' => $user->email],
+                    'until' => $until->toDateTimeString(),
+                    'reason' => 'Too many failed sign-in attempts',
+                ]);
             }
         }
 
         $this->recordEvent($user, $request, false, false, $reason);
         $this->audit->log('auth.login_failed', $user, null, compact('email', 'reason'), (string) $request->ip());
+
+        // Optional threshold notification: after every Nth failure, alert admins.
+        if ($user && ! $lockedNow) {
+            $count = (int) $user->fresh()->failed_login_attempts;
+            $threshold = max(3, (int) config('security.max_login_attempts', 8) - 2);
+            if ($count >= $threshold) {
+                $this->notifications->dispatch('login.failed_threshold', [
+                    'email' => $user->email,
+                    'count' => $count,
+                    'ip' => (string) $request->ip(),
+                    'when' => now()->toDateTimeString(),
+                ]);
+            }
+        }
     }
 
     private function recordEvent(?User $user, Request $request, bool $ok, bool $newIp, ?string $reason): void

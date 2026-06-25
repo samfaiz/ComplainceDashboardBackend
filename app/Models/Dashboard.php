@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Dashboard extends Model
 {
@@ -27,5 +28,12 @@ class Dashboard extends Model
     public function source(): BelongsTo
     {
         return $this->belongsTo(ApiSource::class, 'api_source_id');
+    }
+
+    public function assignees(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'dashboard_user')
+            ->withPivot(['assigned_by_user_id', 'created_at'])
+            ->withTimestamps();
     }
 }
