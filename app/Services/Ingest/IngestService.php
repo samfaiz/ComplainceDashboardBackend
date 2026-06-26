@@ -7,6 +7,7 @@ use App\Models\Endpoint;
 use App\Models\SourceRun;
 use App\Services\Connectors\ConnectorFactory;
 use App\Services\Notifications\NotificationService;
+use App\Support\Tenancy;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -18,6 +19,7 @@ class IngestService
         private Normalizer $normalizer,
         private Summarizer $summarizer,
         private NotificationService $notifications,
+        private Tenancy $tenancy,
     ) {}
 
     /**
@@ -26,6 +28,17 @@ class IngestService
      * failures are recorded on the run + source.
      */
     public function run(ApiSource $source, string $secret, string $trigger = 'scheduled'): SourceRun
+    {
+        // Stamp every snapshot/run/endpoint with the source's organization and
+        // resolve notifications within it — even on the scheduler (console) path
+        // where there is otherwise no tenant context.
+        return $this->tenancy->runFor(
+            $source->organization_id,
+            fn () => $this->performRun($source, $secret, $trigger),
+        );
+    }
+
+    private function performRun(ApiSource $source, string $secret, string $trigger): SourceRun
     {
         $startedAt = now();
         $previousStatus = $source->last_status;
@@ -126,6 +139,9 @@ class IngestService
                 $lastSeen = $e['last_seen_at'] ?? null;
 
                 $rows[] = [
+                    // Bulk insert bypasses the model hook, so stamp the tenant
+                    // explicitly (we run inside the source's org context).
+                    'organization_id' => $this->tenancy->id(),
                     'snapshot_id' => $snapshotId,
                     'api_source_id' => $sourceId,
                     'external_id' => $e['external_id'] ?? null,

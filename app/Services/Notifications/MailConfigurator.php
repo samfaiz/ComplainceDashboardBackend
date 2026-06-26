@@ -3,6 +3,7 @@
 namespace App\Services\Notifications;
 
 use App\Models\MailSettings;
+use App\Support\Tenancy;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -17,10 +18,18 @@ use Throwable;
  */
 class MailConfigurator
 {
-    public function apply(): void
+    public function apply(?int $organizationId = null): void
     {
+        $organizationId ??= app(Tenancy::class)->id();
+
+        if ($organizationId === null) {
+            return; // no tenant context → keep the .env defaults
+        }
+
         try {
-            $settings = MailSettings::query()->first();
+            $settings = MailSettings::withoutOrganizationScope()
+                ->where('organization_id', $organizationId)
+                ->first();
         } catch (Throwable) {
             return; // tables not migrated yet
         }

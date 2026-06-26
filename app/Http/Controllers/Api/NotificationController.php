@@ -12,6 +12,7 @@ use App\Services\Notifications\MailConfigurator;
 use App\Services\Notifications\NotificationCatalog;
 use App\Services\Notifications\NotificationService;
 use App\Services\Security\AuditLogger;
+use App\Support\Tenancy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
@@ -23,7 +24,17 @@ class NotificationController extends Controller
         private NotificationService $notifications,
         private MailConfigurator $mailConfigurator,
         private AuditLogger $audit,
+        private Tenancy $tenancy,
     ) {}
+
+    /** The organization the current request operates within (org admin or entered org). */
+    private function orgId(): int
+    {
+        $id = $this->tenancy->id();
+        abort_if($id === null, 400, 'Select an organization first.');
+
+        return $id;
+    }
 
     /* ------------------------------------------------------------------ */
     /* Mail settings (admin)                                              */
@@ -32,7 +43,7 @@ class NotificationController extends Controller
     public function getMailSettings(Request $request): JsonResponse
     {
         abort_unless($request->user()->isAdmin(), 403);
-        $s = MailSettings::active();
+        $s = MailSettings::forOrganization($this->orgId());
         return response()->json(['settings' => $this->serializeMailSettings($s)]);
     }
 
@@ -53,7 +64,7 @@ class NotificationController extends Controller
             'enabled' => ['required', 'boolean'],
         ]);
 
-        $settings = MailSettings::active();
+        $settings = MailSettings::forOrganization($this->orgId());
         $settings->fill([
             'transport' => $data['transport'],
             'host' => $data['host'] ?? null,
@@ -90,7 +101,7 @@ class NotificationController extends Controller
 
         $this->mailConfigurator->apply(); // make sure latest config is loaded
 
-        $settings = MailSettings::active();
+        $settings = MailSettings::forOrganization($this->orgId());
         try {
             Mail::raw(
                 "This is a test email from EDR Compliance Dashboard.\nSent at ".now()->toDateTimeString(),

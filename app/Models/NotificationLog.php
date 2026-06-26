@@ -2,13 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToOrganization;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class NotificationLog extends Model
 {
+    use BelongsToOrganization;
+
     protected $fillable = [
-        'user_id', 'event_key', 'channel', 'recipient', 'subject',
+        'organization_id', 'user_id', 'event_key', 'channel', 'recipient', 'subject',
         'status', 'error', 'payload', 'sent_at',
     ];
 

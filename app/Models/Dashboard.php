@@ -2,14 +2,17 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToOrganization;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Dashboard extends Model
 {
+    use BelongsToOrganization;
+
     protected $fillable = [
-        'user_id', 'api_source_id', 'name', 'is_default', 'layout',
+        'organization_id', 'user_id', 'api_source_id', 'name', 'is_default', 'layout',
     ];
 
     protected function casts(): array

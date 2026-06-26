@@ -7,6 +7,7 @@ use App\Models\NotificationLog;
 use App\Models\NotificationSubscription;
 use App\Models\NotificationTemplate;
 use App\Models\User;
+use App\Support\Tenancy;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -28,27 +29,46 @@ class NotificationService
 {
     public function __construct(
         private TemplateRenderer $renderer,
+        private Tenancy $tenancy,
+        private MailConfigurator $mailConfigurator,
     ) {}
 
-    /** Dispatch an event. $payload values are exposed to templates as {{ key }}. */
-    public function dispatch(string $eventKey, array $payload = [], ?User $targetUser = null): void
+    /**
+     * Dispatch an event. $payload values are exposed to templates as {{ key }}.
+     *
+     * The organization is taken from the target user, the explicit argument, or
+     * the active tenant context (in that order). With no organization we send
+     * nothing — that prevents an event with no clear tenant from broadcasting
+     * across organizations.
+     */
+    public function dispatch(string $eventKey, array $payload = [], ?User $targetUser = null, ?int $organizationId = null): void
     {
-        $template = NotificationTemplate::forEvent($eventKey);
-        if (! $template || ! $template->enabled) {
+        $orgId = $targetUser?->organization_id ?? $organizationId ?? $this->tenancy->id();
+        if ($orgId === null) {
             return;
         }
 
-        $recipients = $this->resolveRecipients($eventKey, $targetUser);
+        $this->tenancy->runFor($orgId, function () use ($eventKey, $payload, $targetUser, $orgId) {
+            $template = NotificationTemplate::forEvent($eventKey);
+            if (! $template || ! $template->enabled) {
+                return;
+            }
 
-        // Merge a few app-wide values every template can use.
-        $base = array_merge($payload, [
-            'event_key' => $eventKey,
-            'app' => ['name' => config('app.name'), 'url' => config('app.url')],
-        ]);
+            // Load this organization's SMTP config before sending.
+            $this->mailConfigurator->apply($orgId);
 
-        foreach ($recipients as $user) {
-            $this->sendOne($template, $user, $base);
-        }
+            $recipients = $this->resolveRecipients($eventKey, $targetUser);
+
+            // Merge a few app-wide values every template can use.
+            $base = array_merge($payload, [
+                'event_key' => $eventKey,
+                'app' => ['name' => config('app.name'), 'url' => config('app.url')],
+            ]);
+
+            foreach ($recipients as $user) {
+                $this->sendOne($template, $user, $base);
+            }
+        });
     }
 
     /** Render a template against a payload — used by preview/test endpoints. */
@@ -73,6 +93,9 @@ class NotificationService
     /** Test send: render template, send to a single email, log it. */
     public function testSend(NotificationTemplate $template, string $recipientEmail, array $payload, ?User $actor = null): NotificationLog
     {
+        // Use the current organization's SMTP config (admin acts within their org).
+        $this->mailConfigurator->apply();
+
         $rendered = $this->preview($template, $payload, $actor);
 
         $log = NotificationLog::create([

@@ -2,13 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToOrganization;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class SourceRun extends Model
 {
+    use BelongsToOrganization;
+
     protected $fillable = [
-        'api_source_id', 'status', 'trigger', 'started_at', 'finished_at',
+        'organization_id', 'api_source_id', 'status', 'trigger', 'started_at', 'finished_at',
         'duration_ms', 'records_ingested', 'error_message',
     ];
 

@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToOrganization;
 use Illuminate\Database\Eloquent\Model;
 
 class NotificationTemplate extends Model
 {
+    use BelongsToOrganization;
+
     protected $fillable = [
-        'event_key', 'display_name', 'category', 'default_severity',
+        'organization_id', 'event_key', 'display_name', 'category', 'default_severity',
         'subject', 'body_html', 'body_text', 'enabled',
     ];
 

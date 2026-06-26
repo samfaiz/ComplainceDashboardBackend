@@ -79,6 +79,8 @@ class DemoDataGenerator
             $rows = [];
             foreach ($normalized as $e) {
                 $rows[] = [
+                    // Bulk insert bypasses the model hook, so stamp the tenant explicitly.
+                    'organization_id' => $source->organization_id,
                     'snapshot_id' => $snapshot->id,
                     'api_source_id' => $source->id,
                     'external_id' => $e['external_id'],

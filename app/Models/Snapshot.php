@@ -2,14 +2,17 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToOrganization;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Snapshot extends Model
 {
+    use BelongsToOrganization;
+
     protected $fillable = [
-        'api_source_id', 'source_run_id', 'captured_at', 'endpoint_count', 'summary',
+        'organization_id', 'api_source_id', 'source_run_id', 'captured_at', 'endpoint_count', 'summary',
     ];
 
     protected function casts(): array

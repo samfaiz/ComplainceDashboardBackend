@@ -5,10 +5,13 @@ namespace App\Models;
 use App\Services\Crypto\SecretBox;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Models\Concerns\BelongsToOrganization;
 use Illuminate\Database\Eloquent\Model;
 
 class ApiSource extends Model
 {
+    use BelongsToOrganization;
+
     public const VENDORS = [
         'generic', 'crowdstrike', 'defender', 'sentinelone', 'wazuh',
         'trendmicro', 'cortex', 'cisco_amp', 'elastic', 'sophos',
@@ -23,7 +26,7 @@ class ApiSource extends Model
     public const SECRET_PER_LOGIN = 'per_login';
 
     protected $fillable = [
-        'user_id', 'site_id', 'name', 'vendor', 'base_url', 'auth_type', 'auth_config',
+        'organization_id', 'user_id', 'site_id', 'name', 'vendor', 'base_url', 'auth_type', 'auth_config',
         'secret_mode', 'secret_encrypted', 'secret_hint', 'request_config',
         'field_mappings', 'refresh_interval_minutes', 'is_enabled',
         'last_run_at', 'last_status', 'last_error', 'latest_snapshot_id',

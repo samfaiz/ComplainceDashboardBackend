@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Organization;
 use App\Models\User;
 use App\Services\Security\AuditLogger;
 use App\Services\Security\LoginSecurityService;
@@ -137,7 +138,17 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json(['user' => $this->userPayload($request->user())]);
+        $payload = $this->userPayload($request->user());
+
+        // Surface the org a platform owner is currently impersonating (drives the
+        // "Viewing {org}" banner and org-scoped data while entered).
+        $enteredId = $request->session()->get('platform.organization_id');
+        if ($request->user()->isSuperAdmin() && $enteredId) {
+            $org = Organization::find($enteredId);
+            $payload['viewing_organization'] = $org ? ['id' => $org->id, 'name' => $org->name] : null;
+        }
+
+        return response()->json(['user' => $payload]);
     }
 
     public static function userPayload(User $user): array
@@ -147,9 +158,12 @@ class AuthController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
+            'organization_id' => $user->organization_id,
+            'organization_name' => $user->organization?->name,
             'is_active' => $user->is_active,
             'is_admin' => $user->isAdmin(),
             'is_super_admin' => $user->isSuperAdmin(),
+            'is_platform_owner' => $user->isSuperAdmin(),
             'can_manage' => $user->canManage(),
             'mfa_enabled' => $user->mfa_enabled,
             'mfa_required' => (bool) $user->mfa_required,

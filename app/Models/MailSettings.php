@@ -3,13 +3,16 @@
 namespace App\Models;
 
 use App\Services\Crypto\SecretBox;
+use App\Models\Concerns\BelongsToOrganization;
 use Illuminate\Database\Eloquent\Model;
 use Throwable;
 
 class MailSettings extends Model
 {
+    use BelongsToOrganization;
+
     protected $fillable = [
-        'transport', 'host', 'port', 'encryption', 'username', 'password_encrypted',
+        'organization_id', 'transport', 'host', 'port', 'encryption', 'username', 'password_encrypted',
         'from_address', 'from_name', 'reply_to', 'enabled',
         'last_test_at', 'last_test_status', 'last_test_error',
     ];
@@ -23,13 +26,13 @@ class MailSettings extends Model
         ];
     }
 
-    /** Convenience singleton fetch — creates an empty row on first access. */
-    public static function active(): self
+    /** The mail settings row for one organization — created empty on first access. */
+    public static function forOrganization(int $organizationId): self
     {
-        return self::query()->firstOrCreate(['id' => 1], [
-            'transport' => 'log',
-            'enabled' => false,
-        ]);
+        return self::withoutOrganizationScope()->firstOrCreate(
+            ['organization_id' => $organizationId],
+            ['transport' => 'log', 'enabled' => false],
+        );
     }
 
     public function setPassword(?string $plain): void

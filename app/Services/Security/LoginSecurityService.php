@@ -37,6 +37,7 @@ class LoginSecurityService
         $hadBaseline = $user->knownIps()->exists();
 
         $user->knownIps()->create([
+            'organization_id' => $user->organization_id,
             'ip_address' => $ip,
             'trusted' => ! $hadBaseline,   // very first IP becomes the trusted baseline
             'login_count' => 1,
@@ -75,7 +76,7 @@ class LoginSecurityService
                 'ip' => $ip,
                 'user_agent' => substr((string) $request->userAgent(), 0, 240),
                 'when' => now()->toDateTimeString(),
-            ]);
+            ], organizationId: $user->organization_id);
         }
 
         return $isNewIp;
@@ -107,7 +108,7 @@ class LoginSecurityService
                     'attempts' => $attempts,
                     'ip' => (string) $request->ip(),
                     'when' => now()->toDateTimeString(),
-                ]);
+                ], organizationId: $user->organization_id);
 
                 return;
             }
@@ -122,7 +123,7 @@ class LoginSecurityService
                     'user' => ['name' => $user->name, 'email' => $user->email],
                     'until' => $until->toDateTimeString(),
                     'reason' => 'Too many failed sign-in attempts',
-                ]);
+                ], organizationId: $user->organization_id);
             }
             $user->forceFill($attrs)->save();
         }
@@ -134,6 +135,7 @@ class LoginSecurityService
     private function recordEvent(?User $user, Request $request, bool $ok, bool $newIp, ?string $reason): void
     {
         LoginEvent::create([
+            'organization_id' => $user?->organization_id,
             'user_id' => $user?->id,
             'email' => $user?->email ?? $request->input('email'),
             'ip_address' => $request->ip(),

@@ -2,13 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToOrganization;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Site extends Model
 {
-    protected $fillable = ['user_id', 'name'];
+    use BelongsToOrganization;
+
+    protected $fillable = ['organization_id', 'user_id', 'name'];
 
     public function user(): BelongsTo
     {

@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\InsightsController;
 use App\Http\Controllers\Api\MfaController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PasswordController;
+use App\Http\Controllers\Api\PlatformController;
 use App\Http\Controllers\Api\SiteController;
 use Illuminate\Support\Facades\Route;
 
@@ -27,7 +28,7 @@ Route::post('/login/mfa', [AuthController::class, 'loginMfa']);
 | Authenticated endpoints
 |--------------------------------------------------------------------------
 */
-Route::middleware(['auth:sanctum', 'active', 'track', 'password.changed', 'mfa.enrolled'])->group(function () {
+Route::middleware(['auth:sanctum', 'active', 'tenant', 'track', 'password.changed', 'mfa.enrolled'])->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::put('/password', [PasswordController::class, 'update']);
@@ -89,6 +90,21 @@ Route::middleware(['auth:sanctum', 'active', 'track', 'password.changed', 'mfa.e
     Route::get('/dashboards/{dashboard}', [DashboardController::class, 'show']);
     Route::put('/dashboards/{dashboard}', [DashboardController::class, 'update']);
     Route::delete('/dashboards/{dashboard}', [DashboardController::class, 'destroy']);
+
+    /*
+    |----------------------------------------------------------------------
+    | Platform owner (super_admin) — cross-organization management
+    |----------------------------------------------------------------------
+    */
+    Route::middleware('role:super_admin')->prefix('platform')->group(function () {
+        Route::get('/organizations', [PlatformController::class, 'organizations']);
+        Route::post('/organizations', [PlatformController::class, 'store']);
+        Route::get('/organizations/{organization}', [PlatformController::class, 'show']);
+        Route::put('/organizations/{organization}', [PlatformController::class, 'update']);
+        Route::delete('/organizations/{organization}', [PlatformController::class, 'destroy']);
+        Route::post('/organizations/{organization}/enter', [PlatformController::class, 'enter']);
+        Route::post('/exit', [PlatformController::class, 'exit']);
+    });
 
     /*
     |----------------------------------------------------------------------
