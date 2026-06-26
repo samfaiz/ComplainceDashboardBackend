@@ -21,15 +21,16 @@ class ProvisionOrganization
 
     /**
      * @param  array{name:string,email:string,password:string,must_change_password?:bool}  $admin
+     * @param  array<string,mixed>  $orgAttributes  extra Organization columns (e.g. is_demo, expires_at)
      */
-    public function create(string $name, array $admin, ?User $creator = null): Organization
+    public function create(string $name, array $admin, ?User $creator = null, array $orgAttributes = []): Organization
     {
-        $org = Organization::create([
+        $org = Organization::create(array_merge([
             'name' => $name,
             'slug' => $this->uniqueSlug($name),
             'is_active' => true,
             'created_by_user_id' => $creator?->id,
-        ]);
+        ], $orgAttributes));
 
         $this->tenancy->runFor($org->id, function () use ($org, $admin) {
             $this->seedTemplates();

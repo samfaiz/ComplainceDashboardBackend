@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiSourceController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DataController;
+use App\Http\Controllers\Api\DemoController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\InsightsController;
 use App\Http\Controllers\Api\MfaController;
@@ -23,12 +24,16 @@ use Illuminate\Support\Facades\Route;
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/login/mfa', [AuthController::class, 'loginMfa']);
 
+// "Try it" — spin up a throwaway demo workspace and auto sign-in. Rate-limited
+// (≈5 per hour per IP) since it is public and creates data.
+Route::post('/demo', [DemoController::class, 'store'])->middleware('throttle:5,60');
+
 /*
 |--------------------------------------------------------------------------
 | Authenticated endpoints
 |--------------------------------------------------------------------------
 */
-Route::middleware(['auth:sanctum', 'active', 'tenant', 'track', 'password.changed', 'mfa.enrolled'])->group(function () {
+Route::middleware(['auth:sanctum', 'active', 'demo.active', 'tenant', 'track', 'password.changed', 'mfa.enrolled'])->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::put('/password', [PasswordController::class, 'update']);

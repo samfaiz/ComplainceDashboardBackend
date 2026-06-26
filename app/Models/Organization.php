@@ -14,13 +14,15 @@ use Illuminate\Database\Eloquent\Model;
 class Organization extends Model
 {
     protected $fillable = [
-        'name', 'slug', 'is_active', 'created_by_user_id', 'settings',
+        'name', 'slug', 'is_active', 'is_demo', 'expires_at', 'created_by_user_id', 'settings',
     ];
 
     protected function casts(): array
     {
         return [
             'is_active' => 'boolean',
+            'is_demo' => 'boolean',
+            'expires_at' => 'datetime',
             'settings' => 'array',
         ];
     }
@@ -28,6 +30,12 @@ class Organization extends Model
     public function isActive(): bool
     {
         return (bool) $this->is_active;
+    }
+
+    /** A demo org whose 1-hour window has elapsed. */
+    public function isExpired(): bool
+    {
+        return $this->is_demo && $this->expires_at !== null && $this->expires_at->isPast();
     }
 
     public function users(): HasMany

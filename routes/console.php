@@ -8,3 +8,8 @@ use Illuminate\Support\Facades\Schedule;
 Schedule::command('sources:refresh-due')
     ->everyMinute()
     ->withoutOverlapping();
+
+// Remove expired "try it" demo workspaces (and all their data).
+Schedule::command('demos:purge')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();

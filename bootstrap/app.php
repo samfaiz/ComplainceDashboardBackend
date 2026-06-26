@@ -21,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\EnsureRole::class,
             'track' => \App\Http\Middleware\TrackActivity::class,
             'active' => \App\Http\Middleware\EnsureActive::class,
+            'demo.active' => \App\Http\Middleware\BlockExpiredDemo::class,
             'tenant' => \App\Http\Middleware\SetTenant::class,
             'password.changed' => \App\Http\Middleware\EnsurePasswordChanged::class,
             'mfa.enrolled' => \App\Http\Middleware\EnsureMfaEnrolled::class,

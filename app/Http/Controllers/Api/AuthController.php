@@ -160,6 +160,8 @@ class AuthController extends Controller
             'role' => $user->role,
             'organization_id' => $user->organization_id,
             'organization_name' => $user->organization?->name,
+            'is_demo' => (bool) $user->organization?->is_demo,
+            'demo_expires_at' => $user->organization?->is_demo ? $user->organization->expires_at : null,
             'is_active' => $user->is_active,
             'is_admin' => $user->isAdmin(),
             'is_super_admin' => $user->isSuperAdmin(),
