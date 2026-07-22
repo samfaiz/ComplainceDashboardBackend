@@ -13,7 +13,7 @@ class MailSettings extends Model
 
     protected $fillable = [
         'organization_id', 'transport', 'host', 'port', 'encryption', 'username', 'password_encrypted',
-        'from_address', 'from_name', 'reply_to', 'enabled',
+        'from_address', 'from_name', 'reply_to', 'notify_email', 'enabled',
         'last_test_at', 'last_test_status', 'last_test_error',
     ];
 
@@ -31,6 +31,19 @@ class MailSettings extends Model
     {
         return self::withoutOrganizationScope()->firstOrCreate(
             ['organization_id' => $organizationId],
+            ['transport' => 'log', 'enabled' => false],
+        );
+    }
+
+    /**
+     * The platform-owner mail row (organization_id = NULL). Used for platform-level
+     * email (SMTP config + notifications like new account requests), independent of
+     * any organization. There is only ever one such row.
+     */
+    public static function platform(): self
+    {
+        return self::withoutOrganizationScope()->firstOrCreate(
+            ['organization_id' => null],
             ['transport' => 'log', 'enabled' => false],
         );
     }

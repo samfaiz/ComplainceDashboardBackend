@@ -34,6 +34,25 @@ class MailConfigurator
             return; // tables not migrated yet
         }
 
+        $this->applySettings($settings);
+    }
+
+    /** Apply the platform-owner mail row (organization_id = NULL) — for platform-level sends. */
+    public function applyPlatform(): void
+    {
+        try {
+            $settings = MailSettings::withoutOrganizationScope()
+                ->whereNull('organization_id')
+                ->first();
+        } catch (Throwable) {
+            return; // tables not migrated yet
+        }
+
+        $this->applySettings($settings);
+    }
+
+    private function applySettings(?MailSettings $settings): void
+    {
         if (! $settings || ! $settings->enabled) {
             return;
         }

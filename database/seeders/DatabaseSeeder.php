@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Actions\ProvisionOrganization;
+use App\Models\MailSettings;
 use App\Models\User;
 use App\Services\Demo\DemoDataGenerator;
 use App\Support\DefaultDashboard;
@@ -25,6 +26,12 @@ class DatabaseSeeder extends Seeder
                 'is_active' => true,
             ]
         );
+
+        // Platform mail row (organization_id = NULL) — where account-request
+        // notifications are sent. Logged only until SMTP is configured + enabled.
+        $platformMail = MailSettings::platform();
+        $platformMail->notify_email = 'faisalkhan78612@gmail.com';
+        $platformMail->save();
 
         // Demo organization + its first admin (also seeds the org's notification
         // templates and an empty mail settings row).

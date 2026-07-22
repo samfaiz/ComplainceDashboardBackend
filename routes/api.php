@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\MfaController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PasswordController;
 use App\Http\Controllers\Api\PlatformController;
+use App\Http\Controllers\Api\SignupRequestController;
 use App\Http\Controllers\Api\SiteController;
 use Illuminate\Support\Facades\Route;
 
@@ -27,6 +28,9 @@ Route::post('/login/mfa', [AuthController::class, 'loginMfa']);
 // "Try it" — spin up a throwaway demo workspace and auto sign-in. Rate-limited
 // (≈5 per hour per IP) since it is public and creates data.
 Route::post('/demo', [DemoController::class, 'store'])->middleware('throttle:5,60');
+
+// "Contact admin for a new account" — a prospect requests access (no auth).
+Route::post('/signup-request', [SignupRequestController::class, 'store'])->middleware('throttle:5,60');
 
 /*
 |--------------------------------------------------------------------------
@@ -109,6 +113,10 @@ Route::middleware(['auth:sanctum', 'active', 'demo.active', 'tenant', 'track', '
         Route::delete('/organizations/{organization}', [PlatformController::class, 'destroy']);
         Route::post('/organizations/{organization}/enter', [PlatformController::class, 'enter']);
         Route::post('/exit', [PlatformController::class, 'exit']);
+        Route::get('/signup-requests', [SignupRequestController::class, 'index']);
+        Route::get('/mail-settings', [PlatformController::class, 'mailSettings']);
+        Route::put('/mail-settings', [PlatformController::class, 'updateMailSettings']);
+        Route::post('/mail-settings/test', [PlatformController::class, 'testMail']);
     });
 
     /*
